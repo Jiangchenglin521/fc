@@ -121,6 +121,7 @@ class Seq2SeqModel(object):
         self.encoder_inputs = []
         self.decoder_inputs = []
         self.target_weights = []
+        self.target_weights1 = []
         for i in xrange(buckets[-1][0]):    # Last bucket is the biggest one.
             self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                                                                 name="encoder{0}".format(i)))
@@ -129,7 +130,8 @@ class Seq2SeqModel(object):
                                                                                                 name="decoder{0}".format(i)))
             self.target_weights.append(tf.placeholder(dtype, shape=[None],
                                                                                                 name="weight{0}".format(i)))
-
+            self.target_weights1.append(tf.placeholder(dtype, shape=[None],
+                                                                                                name= "weight1{0}".format(i)))
         # Our targets are decoder inputs shifted by one.
         targets = [self.decoder_inputs[i + 1]
                              for i in xrange(len(self.decoder_inputs) - 1)]
@@ -146,12 +148,12 @@ class Seq2SeqModel(object):
             else:
                 self.outputs, self.losses, self.ppxes = seq2seq.model_with_buckets(
                         self.encoder_inputs, self.decoder_inputs, targets,
-                        self.target_weights, self.decoder_emotions, buckets, lambda x, y, z: seq2seq_f(x, y, z, True),
+                        self.target_weights, self.target_weights1, self.decoder_emotions, buckets, lambda x, y, z: seq2seq_f(x, y, z, True),
                         softmax_loss_function=softmax_loss_function, use_imemory=use_imemory, use_ememory=use_ememory)
         else:
             self.outputs, self.losses, self.ppxes = seq2seq.model_with_buckets(
                     self.encoder_inputs, self.decoder_inputs, targets,
-                    self.target_weights, self.decoder_emotions, buckets,
+                    self.target_weights, self.target_weights1, self.decoder_emotions, buckets,
                     lambda x, y, z: seq2seq_f(x, y, z, False),
                     softmax_loss_function=softmax_loss_function, use_imemory=use_imemory, use_ememory=use_ememory)
 
@@ -180,7 +182,7 @@ class Seq2SeqModel(object):
         self.pretrain_saver = tf.train.Saver(self.pretrain_var, write_version=tf.train.SaverDef.V2)
         self.saver = tf.train.Saver(tf.all_variables(), write_version=tf.train.SaverDef.V2, max_to_keep=200)
 
-    def step(self, session, encoder_inputs, decoder_inputs, target_weights, decoder_emotions,
+    def step(self, session, encoder_inputs, decoder_inputs, target_weights,target_weights1, decoder_emotions,
                      bucket_id, forward_only, beam_search):
 
         # Check if the sizes match.
@@ -194,6 +196,9 @@ class Seq2SeqModel(object):
         if len(target_weights) != decoder_size:
             raise ValueError("Weights length must be equal to the one in bucket,"
                                              " %d != %d." % (len(target_weights), decoder_size))
+        if len(target_weights1) != decoder_size:
+            raise ValueError("Weights1 length must be equal to the one in bucket,"
+                                             " %d != %d." % (len(target_weights1), decoder_size))
 
         # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
         input_feed = {}
@@ -202,6 +207,7 @@ class Seq2SeqModel(object):
         for l in xrange(decoder_size):
             input_feed[self.decoder_inputs[l].name] = decoder_inputs[l]
             input_feed[self.target_weights[l].name] = target_weights[l]
+            input_feed[self.target_weights1[l].name] = target_weights1[l]
 
         # Since our targets are decoder inputs shifted by one, we need one more.
         last_target = self.decoder_inputs[decoder_size].name
@@ -234,7 +240,12 @@ class Seq2SeqModel(object):
             else:
                 return None, outputs[0], outputs[1:]    # No gradient norm, loss, outputs.
 
-    def get_batch(self, data, bucket_id):
+    def computWeight(self, ind):
+        _lambda = 0.4
+        weight = 1 / (ind ** _lambda)
+        return weight
+
+    def get_batch(self, data, bucket_id, id2word, word2count):
 
         encoder_size, decoder_size = self.buckets[bucket_id]
         encoder_inputs, decoder_inputs, decoder_emotions = [], [], []
@@ -260,7 +271,7 @@ class Seq2SeqModel(object):
             decoder_emotions.append(decoder_emotion)
 
         # Now we create batch-major vectors from the data selected above.
-        batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+        batch_encoder_inputs, batch_decoder_inputs, batch_weights, batch_constraint_weights = [], [], [], []
 
         batch_decoder_emotions = np.array(decoder_emotions, dtype=np.int32)
 
@@ -278,6 +289,7 @@ class Seq2SeqModel(object):
 
             # Create target_weights to be 0 for targets that are padding.
             batch_weight = np.ones(self.batch_size, dtype=np.float32)
+            batch_cweight = np.ones(self.batch_size, dtype=np.float32)
             for batch_idx in xrange(self.batch_size):
                 # We set weight to 0 if the corresponding target is a PAD symbol.
                 # The corresponding target is decoder_input shifted by 1 forward.
@@ -285,10 +297,15 @@ class Seq2SeqModel(object):
                     target = decoder_inputs[batch_idx][length_idx + 1]
                 if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
                     batch_weight[batch_idx] = 0.0
+                    batch_cweight[batch_idx] = 0.0
+                else:
+                    batch_cweight[batch_idx] = self.computWeight(word2count[id2word[target]])
             batch_weights.append(batch_weight)
-        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, batch_decoder_emotions
+            batch_constraint_weights.append(batch_cweight)
+        # print(batch_constraint_weights)
+        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, batch_constraint_weights, batch_decoder_emotions
 
-    def get_batch_data(self, data, bucket_id):
+    def get_batch_data(self, data, bucket_id,id2word,word2count):
 
         encoder_size, decoder_size = self.buckets[bucket_id]
         encoder_inputs, decoder_inputs, decoder_emotions = [], [], []
@@ -310,7 +327,7 @@ class Seq2SeqModel(object):
             decoder_emotions.append(decoder_emotion)
 
         # Now we create batch-major vectors from the data selected above.
-        batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+        batch_encoder_inputs, batch_decoder_inputs, batch_weights, batch_constraint_weights = [], [], [], []
 
         batch_decoder_emotions = np.array(decoder_emotions, dtype=np.int32)
 
@@ -328,6 +345,7 @@ class Seq2SeqModel(object):
 
             # Create target_weights to be 0 for targets that are padding.
             batch_weight = np.ones(self.batch_size, dtype=np.float32)
+            batch_cweight = np.ones(self.batch_size, dtype=np.float32)
             for batch_idx in xrange(self.batch_size):
                 # We set weight to 0 if the corresponding target is a PAD symbol.
                 # The corresponding target is decoder_input shifted by 1 forward.
@@ -335,8 +353,12 @@ class Seq2SeqModel(object):
                     target = decoder_inputs[batch_idx][length_idx + 1]
                 if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
                     batch_weight[batch_idx] = 0.0
+                    batch_cweight[batch_idx] = 0.0
+                else:
+                    batch_cweight[batch_idx] = self.computWeight(word2count[id2word[target]])
             batch_weights.append(batch_weight)
-        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, batch_decoder_emotions
+            batch_constraint_weights.append(batch_cweight)
+        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, batch_constraint_weights, batch_decoder_emotions
     def get_batch_data1(self, data, bucket_id):
 
         encoder_size, decoder_size = self.buckets[bucket_id]
