@@ -860,7 +860,7 @@ def embedding_attention_seq2seq(encoder_inputs,
 
 
 
-def sequence_loss_by_example(logits, targets, weights, ememory,
+def sequence_loss_by_example(logits, targets, weights, weights1, ememory,
                                                          average_across_timesteps=True,
                                                          softmax_loss_function=None, name=None):
     """Weighted cross-entropy loss for a sequence of logits (per example).
@@ -885,9 +885,9 @@ def sequence_loss_by_example(logits, targets, weights, ememory,
         raise ValueError("Lengths of logits, weights, and targets must be the same "
                                          "%d, %d, %d." % (len(logits), len(weights), len(targets)))
     with ops.name_scope(name, "sequence_loss_by_example",
-                                            logits + targets + weights if ememory is None else logits + targets + weights + [ememory]):
+                                            logits + targets + weights+ weights1 if ememory is None else logits + targets + weights+ weights1 + [ememory]):
         log_perp_list = []
-        for logit, target, weight in zip(logits, targets, weights):
+        for logit, target, weight in zip(logits, targets, weights1):
             print('logits是')
             print(logit)
             print('weight是')
@@ -901,8 +901,11 @@ def sequence_loss_by_example(logits, targets, weights, ememory,
                 #        logit, target)
                 if ememory is None:
                     target = array_ops.reshape(target, [-1])
-                    label = tf.one_hot(target, depth=logit.get_shape().with_rank(2)[1], dtype=tf.float32)
-                    crossent = -tf.reduce_sum(label * tf.log(logit+1e-12), 1)
+                    crossent = nn_ops.sparse_softmax_cross_entropy_with_logits(
+                        labels=target, logits=logit)
+                    # label = tf.one_hot(target, depth=logit.get_shape().with_rank(2)[1], dtype=tf.float32)
+                    #
+                    # crossent = -tf.reduce_sum(label * tf.log(logit+1e-12), 1)
                 else:
                     golden = tf.gather(ememory, target)
                     golden = tf.stack([golden, 1-golden])
@@ -920,7 +923,7 @@ def sequence_loss_by_example(logits, targets, weights, ememory,
     return log_perps
 
 
-def sequence_loss(logits, targets, weights, ememory,
+def sequence_loss(logits, targets, weights, weights1, ememory,
                                     average_across_timesteps=True, average_across_batch=True,
                                     softmax_loss_function=None, name=None):
     """Weighted cross-entropy loss for a sequence of logits, batch-collapsed.
@@ -942,9 +945,9 @@ def sequence_loss(logits, targets, weights, ememory,
     Raises:
         ValueError: If len(logits) is different from len(targets) or len(weights).
     """
-    with ops.name_scope(name, "sequence_loss", logits + targets + weights if ememory is None else logits + targets + weights + [ememory]):
+    with ops.name_scope(name, "sequence_loss", logits + targets + weights + weights1 if ememory is None else logits + targets + weights + weights1 + [ememory]):
         p = sequence_loss_by_example(
-                logits, targets, weights, ememory,
+                logits, targets, weights, weights1, ememory,
                 average_across_timesteps=average_across_timesteps,
                 softmax_loss_function=softmax_loss_function)
         cost_p = math_ops.reduce_sum(p)
@@ -955,7 +958,7 @@ def sequence_loss(logits, targets, weights, ememory,
             return cost_p
 
 
-def model_with_buckets(encoder_inputs, decoder_inputs, targets, weights, decoder_emotions,
+def model_with_buckets(encoder_inputs, decoder_inputs, targets, weights, weights1, decoder_emotions,
                                              buckets, seq2seq, softmax_loss_function=None,
                                              per_example_loss=False, use_imemory=False, use_ememory=False, name=None):
     """Create a sequence-to-sequence model with support for bucketing.
@@ -1016,11 +1019,11 @@ def model_with_buckets(encoder_inputs, decoder_inputs, targets, weights, decoder
                 if per_example_loss:
                     #not work
                     losses.append(math_ops.reduce_sum(imemory**2)/math_ops.cast(array_ops.shape(targets[0])[0], imemory.dtype)+sequence_loss_by_example(
-                            outputs[-1], targets[:bucket[1]], weights[:bucket[1]],
+                            outputs[-1], targets[:bucket[1]], weights[:bucket[1]], weights1[:bucket[1]],
                             softmax_loss_function=softmax_loss_function))
                 else:
                     loss = sequence_loss(
-                            outputs[-1], targets[:bucket[1]], weights[:bucket[1]], None,
+                            outputs[-1], targets[:bucket[1]], weights[:bucket[1]], weights1[:bucket[1]], None,
                             softmax_loss_function=softmax_loss_function)
                     ppxes.append(loss)
                     if use_imemory:
