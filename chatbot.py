@@ -14,7 +14,7 @@ from nltk.translate.bleu_score import sentence_bleu
 import numpy as np
 from six.moves import xrange    # pylint: disable=redefined-builtin
 import tensorflow as tf
-
+import pickle
 import data_utils
 import seq2seq_model
 import configparser
@@ -30,8 +30,8 @@ tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.98,
                                                     "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
                                                    "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("epoch", 95, "num of whole training turn")
-tf.app.flags.DEFINE_integer("batch_size", 128,
+tf.app.flags.DEFINE_integer("epoch", 80, "num of whole training turn")
+tf.app.flags.DEFINE_integer("batch_size", 256,
                                                         "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 256, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("load_model", 0, "which model to load.")
@@ -197,6 +197,7 @@ def train():
         # Read data into buckets and compute their sizes.
         print ("Reading development and training data (limit: %d)."
                      % FLAGS.max_train_data_size)
+        _, id2word = data_utils.initialize_vocabulary('/mnt/data/jiangchenglin/fc-master/data/vocab40000.response')
         dev_set = read_data(dev_path)
         dev_set = refine_data(dev_set)
         train_set = read_data(train_path, FLAGS.max_train_data_size)
@@ -221,6 +222,12 @@ def train():
         in_epoch_steps = FLAGS.totaldata / FLAGS.batch_size
         previous_losses = []
 
+        word2count = pickle.load(open('/mnt/data/jiangchenglin/fc-master/word2idf', 'rb'))
+        word2count["_PAD"] = 10000000
+        word2count["_GO"] = 10000000
+        word2count["_EOS"] = 10000000
+        word2count["_UNK"] =100
+
         try:  # If the user exit while training, we still try to save the model
             for e in range(FLAGS.epoch):
                 print("enter the traing, epoch:",(e+1))
@@ -235,10 +242,10 @@ def train():
                     print("Get a batch and make a step")
 
                     start_time = time.time()
-                    encoder_inputs, decoder_inputs, target_weights, decoder_emotions = model.get_batch(
-                        train_set, bucket_id)
+                    encoder_inputs, decoder_inputs, target_weights, target_weights1, decoder_emotions = model.get_batch(
+                        train_set, bucket_id, id2word, word2count)
                     _, step_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
-                                                 target_weights, decoder_emotions, bucket_id, False, False)
+                                                 target_weights, target_weights1, decoder_emotions, bucket_id, False, False)
                     step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
                     loss += step_loss / FLAGS.steps_per_checkpoint
                     current_step += 1
@@ -273,8 +280,8 @@ def train():
                                 for batch in xrange(0, len_data, FLAGS.batch_size):
                                     step = min(FLAGS.batch_size, len_data - batch)
                                     model.batch_size = step
-                                    encoder_inputs, decoder_inputs, target_weights, decoder_emotions = model.get_batch_data(
-                                        dev_set[bucket_id][e][batch:batch + step], bucket_id)
+                                    encoder_inputs, decoder_inputs, target_weights, target_weights1, decoder_emotions = model.get_batch_data(
+                                        dev_set[bucket_id][e][batch:batch + step], bucket_id, id2word, word2count)
                                     _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
                                                                  target_weights, decoder_emotions, bucket_id, True,
                                                                  False)
@@ -480,8 +487,8 @@ def decode():
                                  if _buckets[b][0] > len(token_ids)])
                 # Get a 1-element batch to feed the sentence to the model.
                 decoder_emotion = 0
-                encoder_inputs, decoder_inputs, target_weights, decoder_emotions = model.get_batch_data(
-                    [[token_ids, [], 0, decoder_emotion]], bucket_id)
+                encoder_inputs, decoder_inputs, target_weights,target_weights1, decoder_emotions = model.get_batch_data(
+                    [[token_ids, [], 0, decoder_emotion]], bucket_id, id2word, word2count)
                 # Get output logits for the sentence.
                 results, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
                                                        target_weights, decoder_emotions, bucket_id, True, beam_search)
@@ -603,8 +610,8 @@ def evaluation():
                     for batch in xrange(0, len_data, FLAGS.batch_size):
                         step = min(FLAGS.batch_size, len_data - batch)
                         model.batch_size = step
-                        encoder_inputs, decoder_inputs, target_weights, decoder_emotions = model.get_batch_data(
-                            dev_set[bucket_id][e][batch:batch + step], bucket_id)
+                        encoder_inputs, decoder_inputs, target_weights, target_weights1, decoder_emotions = model.get_batch_data(
+                            dev_set[bucket_id][e][batch:batch + step], bucket_id, id2word, word2count)
                         _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
                                                      target_weights, decoder_emotions, bucket_id, True,
                                                      False)
