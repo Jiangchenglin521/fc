@@ -262,14 +262,12 @@ def attention_decoder(decoder_inputs,
             if input_size.value is None:
                 raise ValueError("Could not infer input size from input: %s" % inp.name)
 
-            print('=====kakakak')
-            print(attns)
+       
             x = linear([inp] + attns, input_size, True)
             # x = array_ops.concat([inp, attns[0]], 1) #这个在加情感的时候使用
             # Run the RNN.
             if emotion is None and imemory is None:
-                print('=====hhhhhhh')
-                print(x)
+           
                 cell_output, state = cell(x, state)
                 print('通过')
             else:
@@ -664,7 +662,8 @@ def embedding_attention_decoder(decoder_inputs,
                     loop_function=loop_function,
                     initial_state_attention=initial_state_attention)
 
-
+#修改成了双向GRU模式，注意对输出需要进行shape
+#需要符合batch_size, time_step, hidden_size]，最后做拼接
 def embedding_attention_seq2seq(encoder_inputs,
                                     decoder_inputs,
                                     decoder_emotions,
@@ -888,10 +887,10 @@ def sequence_loss_by_example(logits, targets, weights, weights1, ememory,
                                             logits + targets + weights+ weights1 if ememory is None else logits + targets + weights+ weights1 + [ememory]):
         log_perp_list = []
         for logit, target, weight in zip(logits, targets, weights1):
-            print('logits是')
-            print(logit)
-            print('weight是')
-            print(weight)
+#             print('logits是')
+#             print(logit)
+#             print('weight是')
+#             print(weight)
             if softmax_loss_function is None:
                 # TODO(irving,ebrevdo): This reshape is needed because
                 # sequence_loss_by_example is called with scalars sometimes, which
@@ -906,6 +905,7 @@ def sequence_loss_by_example(logits, targets, weights, weights1, ememory,
                     # label = tf.one_hot(target, depth=logit.get_shape().with_rank(2)[1], dtype=tf.float32)
                     #
                     # crossent = -tf.reduce_sum(label * tf.log(logit+1e-12), 1)
+                #无需关注else部分
                 else:
                     golden = tf.gather(ememory, target)
                     golden = tf.stack([golden, 1-golden])
@@ -914,7 +914,7 @@ def sequence_loss_by_example(logits, targets, weights, weights1, ememory,
             else:
                 #sampled softmax not work
                 crossent = softmax_loss_function(logit, target)
-            log_perp_list.append(crossent * weight)
+            log_perp_list.append(crossent * weight)#使用的是载入的itf权重
         log_perps = math_ops.add_n(log_perp_list)
         if average_across_timesteps:
             total_size = math_ops.add_n(weights)
