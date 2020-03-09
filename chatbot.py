@@ -1,4 +1,24 @@
 #coding=utf-8
+# Copyright 2020 JiangChenglin. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+"""
+Main script. See README.md for more information/主文件，各模块分配详见README文件
+
+Use python 3/请使用PYTHON 3版本
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -19,6 +39,8 @@ import data_utils
 import seq2seq_model
 import configparser
 
+#配置参数文件接口，统一配置，在此修改
+#训练，测试参数输入
 config = configparser.RawConfigParser()
 config.read('config')
 
@@ -82,7 +104,8 @@ FLAGS = tf.app.flags.FLAGS
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 _buckets = [(12, 12), (16, 16), (20, 20), (30, 30)]
 
-
+#读取并分配数据，符合模型训练feed的数据结构
+#返回：结构化的训练数据
 def read_data(path, max_size=None):
     data_set = [[] for _ in _buckets]
     data = json.load(open(path,'r'))
@@ -101,7 +124,7 @@ def read_data(path, max_size=None):
                 break
 
     return data_set
-
+#可用于优化数据的函数
 def refine_data(data):
     new_data = []
     for d in data:
@@ -110,9 +133,11 @@ def refine_data(data):
             b.append([x for x in d if x[-1] == e])
         new_data.append(b)
     return new_data
-
+#构建模型框架
+#负责初始化用于训练的模型，模型的保存，以及测试时已有模型的复载。
 def create_model(session, forward_only, beam_search):
     dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
+    #加载预训练好的词向量文件
     vec_post, vec_response = data_utils.get_data(FLAGS.data_dir, FLAGS.post_vocab_size, FLAGS.response_vocab_size)
     print('============-===============', vec_post)
     print(len(vec_post[1]))
@@ -144,6 +169,7 @@ def create_model(session, forward_only, beam_search):
             print(i.name, i.get_shape())
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
     pre_ckpt = tf.train.get_checkpoint_state(FLAGS.pretrain_dir)
+    #判断是否已经存在模型文件
     if ckpt: #and tf.gfile.Exists(ckpt.model_checkpoint_path+".index"):
         if FLAGS.load_model == 0:
             print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
@@ -153,6 +179,7 @@ def create_model(session, forward_only, beam_search):
             print("Reading model parameters from %s" % path)
             model.saver.restore(session, path)
     else:
+      #初始化，从新训练
         if pre_ckpt:
             session.run(tf.initialize_variables(model.initial_var))
             if FLAGS.pretrain > -1:
@@ -169,6 +196,7 @@ def create_model(session, forward_only, beam_search):
             # print('vec_post:', vec_post.shape)
             # print('vec_res:', vec_response)
             # initvec_post = tf.constant(vec_post, dtype=dtype, name='init_wordvector_post')
+            #定位decoder词向量初始化，用预训练的词向量替换
             initvec_response = tf.constant(vec_response, dtype=dtype, name='init_wordvector_response')
             # embedding_post = [x for x in tf.trainable_variables() if x.name == 'embedding_attention_seq2seq/rnn/embedding_wrapper/embedding:0'][0]
             embedding_response = [x for x in tf.trainable_variables() if x.name == 'embedding_attention_seq2seq/embedding_attention_decoder/embedding:0'][0]
@@ -181,7 +209,7 @@ def create_model(session, forward_only, beam_search):
 #
     return model
 
-
+#开始训练/Start Training
 def train():
     # print(FLAGS.__flags)
     # Prepare data.
@@ -190,7 +218,7 @@ def train():
             FLAGS.data_dir, FLAGS.post_vocab_size, FLAGS.response_vocab_size)
 
     with tf.Session(config=sess_config) as sess:
-        # Create model.
+        # 构建模型/create model
         print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
         model = create_model(sess, False, False)
 
@@ -228,7 +256,7 @@ def train():
         word2count["_EOS"] = 10000000
         word2count["_UNK"] =100
 
-        try:  # If the user exit while training, we still try to save the model
+        try:  # 触发用户终止训练异常，保存当前模型文件
             for e in range(FLAGS.epoch):
                 print("enter the traing, epoch:",(e+1))
                 for i in range(int(in_epoch_steps)):
@@ -238,7 +266,7 @@ def train():
                     bucket_id = min([i for i in xrange(len(train_buckets_scale))
                                      if train_buckets_scale[i] > random_number_01])
 
-                    # Get a batch and make a step.
+                    # Get a batch and make a step./一个一个batch迭代训练，完成一个epoch
                     print("Get a batch and make a step")
 
                     start_time = time.time()
@@ -301,147 +329,7 @@ def train():
                         model.batch_size = FLAGS.batch_size
         except (KeyboardInterrupt, SystemExit):  # If the user press Ctrl+C while testing progress
             print('Interruption detected, exiting the program...')
-
-
-# def generation():
-#     # postf = open('/home/minelab/jiangchenglin/eqa/Mr.E/data/post100w', 'w')
-#     content = open('/Volumes/TOSHIBA EXT/jiangchenglin/py3eqanew/data/post_res', 'w')
-#     emotion = open('/Volumes/TOSHIBA EXT/jiangchenglin/py3eqanew/data/post_emotion_res', 'w')
-#     satis = open('/Volumes/TOSHIBA EXT/jiangchenglin/py3eqanew/data/post_emotion', 'w')
-#     print("Preparing data in %s" % FLAGS.data_dir)
-#     _, dev_path, _, _, _ = data_utils.prepare_data(
-#         FLAGS.data_dir, FLAGS.post_vocab_size, FLAGS.response_vocab_size)
-#
-#     fdev_set = read_data(dev_path)
-#     fdev_set = np.concatenate(fdev_set, 0)
-#     dev_set = json.load(open('/home/minelab/jiangchenglin/eqa/Mr.E/data/human_data', 'r'))
-#
-#     try:
-#         from wordseg_python import Global
-#     except:
-#         Global = None
-#
-#     def split(sent):
-#         sent = sent.decode('utf-8', 'ignore').encode('gbk', 'ignore')
-#         if Global == None:
-#             return sent.decode("gbk").split(' ')
-#         tuples = [(word.decode("gbk"), pos) for word, pos in Global.GetTokenPos(sent)]
-#         return [each[0] for each in tuples]
-#
-#
-#
-#     with tf.Session(config=sess_config) as sess:
-#         with tf.device("/cpu:0"):
-#             # Create model and load parameters.
-#             model = create_model(sess, True, FLAGS.beam_search)
-#             model.batch_size = 1  # We decode one sentence at a time.
-#             beam_search = FLAGS.beam_search
-#             beam_size = FLAGS.beam_size
-#             num_output = 5
-#
-#             # Load vocabularies.
-#             post_vocab_path = os.path.join(FLAGS.data_dir,
-#                                            config.get('data', 'post_vocab_file') % (FLAGS.post_vocab_size))
-#             response_vocab_path = os.path.join(FLAGS.data_dir,
-#                                                config.get('data', 'response_vocab_file') % (FLAGS.response_vocab_size))
-#             post_vocab, _ = data_utils.initialize_vocabulary(post_vocab_path)
-#             _, rev_response_vocab = data_utils.initialize_vocabulary(response_vocab_path)
-#
-#             # Decode from standard input.
-#             # for sentence
-#             postr = open('/home/minelab/jiangchenglin/eqa/Mr.E/data/post100w', encoding='utf-8').read().splitlines()
-#             post = [x for x in postr]
-#             ee = open('/home/minelab/jiangchenglin/eqa/Mr.E/data/eo', encoding='utf-8').read().splitlines()
-#             eee = [x for x in ee]
-#
-#             count = 0
-#             for sentence in dev_set:
-#
-#                 for mak in fdev_set:
-#                     if mak[0] == sentence:
-#                         eo = mak[3]
-#
-#                 print(sentence)
-#                 token_ids = sentence
-#
-#                 print(token_ids)
-#                 int2emotion = ['null', 'like', 'sad', 'disgust', 'angry', 'happy']
-#                 bucket_id = min([b for b in xrange(len(_buckets))
-#                                  if _buckets[b][0] > len(token_ids)])
-#                 # Get a 1-element batch to feed the sentence to the model.
-#                 decoder_emotion = 0
-#                 encoder_inputs, decoder_inputs, target_weights, decoder_emotions = model.get_batch_data(
-#                     [[token_ids, [], 0, decoder_emotion]], bucket_id)
-#                 # Get output logits for the sentence.
-#                 results, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
-#                                                        target_weights, decoder_emotions, bucket_id, True, beam_search)
-#
-#
-#
-#                 if beam_search:
-#                     result = results[0]
-#                     symbol = results[1]
-#                     parent = results[2]
-#                     result = results[0]
-#                     symbol = results[1]
-#                     parent = results[2]
-#                     res = []
-#                     nounk = []
-#                     for i, (prb, _, prt) in enumerate(result):
-#                         if len(prb) == 0: continue
-#                         for j in xrange(len(prb)):
-#                             p = prt[j]
-#                             s = -1
-#                             output = []
-#                             for step in xrange(i - 1, -1, -1):
-#                                 s = symbol[step][p]
-#                                 p = parent[step][p]
-#                                 output.append(s)
-#                             output.reverse()
-#                             if data_utils.UNK_ID in output:
-#                                 res.append([prb[j][0],
-#                                             " ".join([tf.compat.as_str(rev_response_vocab[int(x)]) for x in output])])
-#                             else:
-#                                 nounk.append([prb[j][0],
-#                                               " ".join([tf.compat.as_str(rev_response_vocab[int(x)]) for x in output])])
-#                     res.sort(key=lambda x: x[0], reverse=True)
-#                     nounk.sort(key=lambda x: x[0], reverse=True)
-#                     if len(nounk) < beam_size:
-#                         res = nounk + res[:(num_output - len(nounk))]
-#                     else:
-#                         res = nounk
-#                     for i in res[:num_output]:
-#                         print(int2emotion[decoder_emotion] + ': ' + i[1])
-#                 else:
-#
-#                     # This is a greedy decoder - outputs are just argmaxes of output_logits.
-#                     outputs = [int(np.argmax(np.split(logit, [2, FLAGS.response_vocab_size], axis=1)[1], axis=1) + 2)
-#                                for logit in output_logits]
-#                     # If there is an EOS symbol in outputs, cut them at that point.
-#                     if data_utils.EOS_ID in outputs:
-#                         outputs = outputs[:outputs.index(data_utils.EOS_ID)]
-#                     # Print out response sentence corresponding to outputs.
-#                     # label = int(interf.interface(lstm, "".join(
-#                     #     [tf.compat.as_str(rev_response_vocab[output]) for output in outputs])))
-#                     lsl=['post: ', 'response: ', 'emotion: ']
-#                     predStringcontent = '{x[0]}{0}\n{x[1]}{1}\n\n'.format(post[count], "".join(
-#                         [tf.compat.as_str(rev_response_vocab[output]) for output in outputs]),
-#                                                                    x=lsl)
-#                     content.write(predStringcontent)
-#                     ########
-#                     predStringemotion = '{x[0]}{0}\n{x[2]}{1}\n{x[1]}{2}\n\n'.format(post[count], int2emotion[int(eee[count])],  "".join(
-#                         [tf.compat.as_str(rev_response_vocab[output]) for output in outputs]),
-#                                                                           x=lsl)
-#                     emotion.write(predStringemotion)
-#                     ########
-#                     predStringsatis = '{x[0]}{0}\n{x[2]}{1}\n\n'.format(post[count], int2emotion[int(eee[count])], x=lsl)
-#                     satis.write(predStringsatis )
-#                 count +=1
-#             # postf.close()
-#             content.close()
-#             emotion.close()
-#             satis.close()
-
+#用于交互实测，体验对话效果。
 def decode():
     try:
         from wordseg_python import Global
@@ -464,7 +352,7 @@ def decode():
             beam_size = FLAGS.beam_size
             num_output = 5
 
-            # Load vocabularies.
+            # 加载词典.
             post_vocab_path = os.path.join(FLAGS.data_dir,
                                            config.get('data', 'post_vocab_file') % (FLAGS.post_vocab_size))
             response_vocab_path = os.path.join(FLAGS.data_dir,
@@ -526,6 +414,8 @@ def decode():
                         res = nounk
                     for i in res[:num_output]:
                         print(1)
+                        
+                #在预测的时候，使用greedy去top1回复进行输出
                 else:
 
                     # This is a greedy decoder - outputs are just argmaxes of output_logits.
@@ -541,7 +431,8 @@ def decode():
                 sys.stdout.flush()
                 sentence = sys.stdin.readline()
     
-
+#以下为评估指标测试样例
+#测试指标perplexity,bleu，以及accuraccy（闲聊中暂不考虑）
 def evaluation():
     with tf.Session(config=sess_config) as sess:
         model = create_model(sess, False, FLAGS.beam_search)
@@ -718,7 +609,7 @@ def evaluation():
 
 
 
-
+#主函数
 def main(_):
     if FLAGS.decode:
         decode()
