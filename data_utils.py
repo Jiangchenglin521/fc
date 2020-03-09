@@ -20,15 +20,9 @@ import math, os
 config = configparser.RawConfigParser()
 config.read('config')
 # Special vocabulary symbols - we always put them at the start.
+# 设定特殊字符，用于句子补长，起止标识
 _PAD = "_PAD"
 _GO = "_GO"
-_GO1 = b"_GO1"
-_GO2 = b"_GO2"
-_GO3 = b"_GO3"
-_GO4 = b"_GO4"
-_GO5 = b"_GO5"
-_GO6 = b"_GO6"
-_GO7 = b"_GO7"
 _EOS = "_EOS"
 _UNK = "_UNK"
 _START_VOCAB = [_PAD, _UNK, _EOS, _GO]
@@ -44,7 +38,7 @@ _DIGIT_RE = re.compile(br"\d")
 _DIGIT_RE2 = re.compile(r"\d")
 
 
-
+#将读入的句子切分
 def basic_tokenizer(sentence):
     """Very basic tokenizer: split the sentence into a list of tokens."""
     words = []
@@ -55,7 +49,9 @@ def basic_tokenizer(sentence):
     # print([w for w in words if w])
     return [w for w in words if w]
 
-
+#根据读入数据构建词典
+#按照限定的词典大小和词出现频率，对超出范围词汇进行裁剪
+#计算覆盖率，overlap，防止覆盖率过低
 def create_vocabulary(vocabulary_path, data, max_vocabulary_size,
                                             tokenizer=None, normalize_digits=True):
     if not gfile.Exists(vocabulary_path):
@@ -97,8 +93,9 @@ def create_vocabulary(vocabulary_path, data, max_vocabulary_size,
             for w in vocab_list:
                 vocab_file.write(w + "\n")
 
-
+#初始化词典
 def initialize_vocabulary(vocabulary_path):
+    #判断词典存在与否
     if gfile.Exists(vocabulary_path):
         rev_vocab = []
         with gfile.GFile(vocabulary_path, mode="rb") as f:
@@ -109,7 +106,7 @@ def initialize_vocabulary(vocabulary_path):
     else:
         raise ValueError("Vocabulary file %s not found.", vocabulary_path)
 
-
+#将自然语言序列转换正词典id序列
 def sentence_to_token_ids(sentence, vocabulary, tokenizer=None, normalize_digits=True):
 
     if tokenizer:
@@ -121,7 +118,7 @@ def sentence_to_token_ids(sentence, vocabulary, tokenizer=None, normalize_digits
     # Normalize digits by 0 before looking words up in the vocabulary.
     return [vocabulary.get(_DIGIT_RE2.sub(r"0", w), UNK_ID) for w in words]
 
-
+#词向id转换
 def data_to_token_ids(data, post_vocabulary_path, response_vocabulary_path,
                                             tokenizer=None, normalize_digits=True):
     print("Tokenizing data")
@@ -138,7 +135,7 @@ def data_to_token_ids(data, post_vocabulary_path, response_vocabulary_path,
         #         print("    tokenizing pair %d" % counter)
         #     response[0] = sentence_to_token_ids(response[0], response_vocab, tokenizer, normalize_digits)
 
-
+#整体处理raw data，构建词典，处理序列转化id
 def prepare_data(data_dir, post_vocabulary_size, response_vocabulary_size, tokenizer=None):
 
     # Get data to the specified directory.
@@ -174,7 +171,7 @@ def prepare_data(data_dir, post_vocabulary_size, response_vocabulary_size, token
             output.write(json.dumps(dev, ensure_ascii=False))
 
     return (tokenids_train_path, tokenids_dev_path, tokenids_test_path, post_vocab_path, response_vocab_path)    
-
+#加载词向量
 def load_word_vector(fname):
     dic = {}
     with open(fname) as f:
@@ -185,7 +182,7 @@ def load_word_vector(fname):
             vector = s[s.find(' ')+1:]
             dic[word] = vector
     return dic
-
+#从词向量文件中load词向量
 def load_vocab(fname):
     vocab = []
     with open(fname) as f:
@@ -193,7 +190,7 @@ def load_vocab(fname):
         for d in data:
             vocab.append(d[:-1])
     return vocab
-
+#为未登录词创建随机embedding
 def random_init(dim):
     return 2 * math.sqrt(3) * (np.random.rand(dim) - 0.5) / math.sqrt(dim)
 
@@ -214,7 +211,7 @@ def refine_wordvec(rvector, vocab, dim=200):
             # print('bb.shape:', bb.shape)
     # print('Total words: %d, Found words: %d, Overlap: %f' % (count, found, float(found)/count))
     return np.array(wordvec)
-
+#转换成自然语言序列
 def cov2seq(sequence, dictionary):
     if not sequence:
         return ''
@@ -225,6 +222,7 @@ def cov2seq(sequence, dictionary):
         elif wordId != PAD_ID :
             sentence.append(dictionary[wordId])
     return sentence
+#加载词向量，返回post和response词向量矩阵
 def get_data(data_dir, post_vocabulary_size, response_vocabulary_size):
     import scipy.io
     path = os.path.join(data_dir, config.get('data', 'wordvec'))
@@ -247,7 +245,8 @@ def get_data(data_dir, post_vocabulary_size, response_vocabulary_size):
         scipy.io.savemat(path, mdict=mdict)
             
     return wordvec_post, wordvec_response
-
+#取外部词典分布矩阵，暂无作用
+#TODO：如情感标签有改进，可以考虑使用这个外部记忆，参考ECM论文
 def get_ememory(data_dir, response_vocabulary_size):
     dic_path = os.path.join(data_dir, config.get('data', 'ememory_vocab_file') % (response_vocabulary_size))
     vocab_response, _ = initialize_vocabulary(os.path.join(data_dir, config.get('data', 'response_vocab_file') % (response_vocabulary_size)))
