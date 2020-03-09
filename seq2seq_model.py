@@ -239,7 +239,7 @@ class Seq2SeqModel(object):
                 return [outputs[0], outputs[1], outputs[2]], None, outputs[3:]  # No gradient norm, loss, outputs.
             else:
                 return None, outputs[0], outputs[1:]    # No gradient norm, loss, outputs.
-
+    #计算itf中的权重值，用于给loss加权
     def computWeight(self, ind):
         _lambda = 0.4
         weight = 1 / (ind ** _lambda)
