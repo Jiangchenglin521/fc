@@ -19,6 +19,8 @@ import numpy as np
 import math, os
 config = configparser.RawConfigParser()
 config.read('config')
+
+#Author: Chenglin
 # Special vocabulary symbols - we always put them at the start.
 # 设定特殊字符，用于句子补长，起止标识
 _PAD = "_PAD"
